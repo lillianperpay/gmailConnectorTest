@@ -1,0 +1,15 @@
+[project]
+name = "gmailconnector"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "boto3>=1.40.54",
+    "google>=3.0.0",
+    "google-api-python-client>=2.184.0",
+    "google-auth>=2.41.1",
+    "google-auth-oauthlib>=1.2.2",
+    "pydantic>=2.12.2",
+    "python-dotenv>=1.1.1",
+]
