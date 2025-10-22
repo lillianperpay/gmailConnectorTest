@@ -10,6 +10,7 @@ from typing import List, Dict, Any
 from helper_functions import *
 from dotenv import load_dotenv
 import os
+import datetime
 
 
 def get_gmail_service(filepath: str):
@@ -442,10 +443,12 @@ def fetch_and_upload_attachments(attachments_messages, metadata_lookup, service,
 
 
 def main():
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-    # Get the ETL-Processed label id, this will be used to determine which emails have been processed 
-    etl_label_id = get_or_create_label_id(service, "ETL-Processed")
+    logging.basicConfig(
+        filename="logs/main.log",      
+        filemode="a",                   
+        level=logging.INFO,        
+        format="%(asctime)s - %(levelname)s - %(message)s"
+    )
     
     service = get_gmail_service("config.json")
     bucket_name = "this should be an env variable"
@@ -453,6 +456,9 @@ def main():
     # Step 1: Fetch message IDs
     messages = fetch_message_ids(service, query="to:invoices@perpay.com, after:2025-10-21")
     print(f"Fetched {len(messages)} message IDs")
+
+    # Get the ETL-Processed label id, this will be used to determine which emails have been processed 
+    etl_label_id = get_or_create_label_id(service, "ETL-Processed")
     
     # Step 2: Fetch metadata in batches (smaller batches for metadata)
     message_metadata_map = get_messages_metadata_batch(service, messages, batch_size=40, delay_between_batches=0.5)
