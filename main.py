@@ -8,21 +8,22 @@ import base64
 import time
 from typing import List, Dict, Any
 from helper_functions import *
+from dotenv import load_dotenv
+import os
 
 
 def get_gmail_service(filepath: str):
     """
     Takes in the configuration information and returns a service object, which is used to connect to Gmail
     """
-    with open(filepath, 'r') as f:
-        config_data = json.load(f)
+    load_dotenv()
     
     creds = Credentials(
         token=None,
-        token_uri="https://oauth2.googleapis.com/token",
-        refresh_token=config_data["client_refresh_token"],
-        client_id=config_data["client_id"],
-        client_secret=config_data["client_secret"]
+        token_uri=os.getenv("token_uri"),
+        refresh_token=os.getenv("client_refresh_token"),
+        client_id=os.getenv("client_id"),
+        client_secret=os.getenv("client_secret")
     )
 
     service = build('gmail', 'v1', credentials=creds)
