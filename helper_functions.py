@@ -6,7 +6,6 @@ except ImportError:
     boto3 = None
 
 def create_s3_key(attachment_id, message_id, filename, metadata_lookup):
-    # Fix: Use message_id as key, not "message_id" string
     if message_id not in metadata_lookup:
         logging.error(f"Message ID {message_id} not found in metadata_lookup")
         return f"unknown_{filename}"
@@ -42,7 +41,6 @@ def extract_attachments_from_payload(payload):
     
     # Check if this is a CSV or PDF attachment
     if attachment_id and filename:
-        # Check file extension
         filename_lower = filename.lower()
         if filename_lower.endswith(('.csv', '.pdf')):
             attachments.append({

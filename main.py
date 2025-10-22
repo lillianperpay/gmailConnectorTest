@@ -117,7 +117,6 @@ def _process_metadata_batch(service, message_ids: List[str]) -> Dict[str, Any]:
             if "too many concurrent requests" in str(exception).lower():
                 logging.warning(f"Rate limit hit for message {request_id}. Consider reducing batch size.")
         else:
-            # Success! Store the response (the 'message' object)
             message_metadata_map[request_id] = response
     
     batch = service.new_batch_http_request(callback=metadata_callback)
@@ -127,7 +126,7 @@ def _process_metadata_batch(service, message_ids: List[str]) -> Dict[str, Any]:
         request = service.users().messages().get(
             userId='me',
             id=msg_id,
-            format='metadata'  # We only want headers
+            format='metadata'  
         )
         # We use the msg_id as the 'request_id' so we can map it in the callback
         batch.add(request, request_id=msg_id)
