@@ -14,7 +14,7 @@ import datetime
 from datetime import datetime, timedelta
 
 
-def get_gmail_service(filepath: str):
+def get_gmail_service():
     """
     Takes in the configuration information and returns a service object, which is used to connect to Gmail
     """
@@ -34,16 +34,26 @@ def get_gmail_service(filepath: str):
 
 def fetch_message_ids(service, query):
     """
-    Get all the message_ids
-    This function handles any nextPageToken logic (having more than 100 emails to parse through) a
+    Get all the message_ids. Handles pagination with nextPageToken.
     """
     try:
-        response = service.users().messages().list(userId='me', q=query, includeSpamTrash=False).execute()
+        response = service.users().messages().list(
+            userId='me',
+            maxResults=20,
+            q=query,
+            labelIds=["Label_3300347536750017431"],
+            includeSpamTrash=False
+        ).execute()
+
+        logging.debug(f"First page response: {response}")
         messages = response.get('messages', [])
-        # TODO: Handle nextPageToken
+
         # while 'nextPageToken' in response:
         #     response = service.users().messages().list(
         #         userId='me',
+        #         q=query,
+        #         labelIds=["Label_3300347536750017431"],
+        #         includeSpamTrash=False,
         #         pageToken=response['nextPageToken']
         #     ).execute()
         #     messages.extend(response.get('messages', []))
@@ -51,6 +61,7 @@ def fetch_message_ids(service, query):
         message_ids = [msg['id'] for msg in messages]
         logging.info(f"Found {len(message_ids)} message IDs to check.")
         return message_ids
+
     except Exception as e:
         logging.error(f"Error fetching message list: {e}")
         return []
@@ -154,18 +165,17 @@ def create_metadata_lookup(message_metadata_map):
     Returns:
         Dict[str, Dict[str, Any]]: Dictionary with message_id as key and vendor/date info as value
     """
-    # TESTING: list of labels to get emails from 
-    labels =["D&H" , "Apex", "Ben Sherman", "O'Rourke Sales", "ETL-Processed"]
     
     metadata_lookup = {}
     
     for message_id, message_data in message_metadata_map.items():
         try:
             # Check if the email is in our list of labels
-            label_ids = message_data.get('labelIds', [])
-            if 'ETL-Processed' in label_ids:
-                logging.debug(f"Skipping message {message_id} - already ETL processed")
-                continue
+            # TODO: uncomment this later 
+            # label_ids = message_data.get('labelIds', [])
+            # if 'ETL-Processed' in label_ids:
+            #     logging.debug(f"Skipping message {message_id} - already ETL processed")
+            #     continue
             
             # Extract vendor and date information
             vendor = None
@@ -313,7 +323,7 @@ def _process_single_batch(service, message_ids: List[str]) -> Dict[str, Any]:
 
 def get_attachments_messages(message_full_payload_map):
     """
-    Get the valid attachments (pdfs or csv) from the messages
+    Get the valid attachments (pdfs or csv) from the full payload of the messages
     This is a parser function that will be used to extract the attachments from the messages
     """
     # List of attachments that we will make a call to the gmail API 
@@ -377,9 +387,7 @@ def fetch_and_upload_attachments(attachments_messages, metadata_lookup, service,
         
         logging.debug(f"Processing attachment {i+1}/{total_attachments}: {filename}")
         logging.debug(f"Attachment ID: {attachment_id}")
-        print(f"Attachment ID: {attachment_id}")
         logging.debug(f"Message ID: {message_id}")
-        print(f"Message ID: {message_id}")
         logging.debug(f"Filename: {filename}")
         
         try:
@@ -393,12 +401,12 @@ def fetch_and_upload_attachments(attachments_messages, metadata_lookup, service,
             file_data = base64.urlsafe_b64decode(attachment['data'])
             
             # Create S3 key
-            s3_key = create_s3_key(attachment_id, message_id, filename, metadata_lookup)
+            s3_key = create_filename(attachment_id, message_id, filename, metadata_lookup)
             
             # Upload to S3 immediately
-            # TODO: Uncomment this when we have the S3 bucket set up
-            # success = send_attachments_to_s3(file_data, s3_key, bucket_name)
-            success = True
+            logging.debug(f"Uploading to S3, s3_key: {s3_key}")
+            logging.debug(f"File snippet: {file_data[:20]}")
+            success = upload_to_s3(s3_key, file_data, bucket_name)
             
             upload_results[attachment_id] = {
                 'success': success,
@@ -410,7 +418,9 @@ def fetch_and_upload_attachments(attachments_messages, metadata_lookup, service,
             
             if success:
                 logging.info(f"Successfully processed attachment {i+1}/{total_attachments}: {filename}")
-                success_add_label = add_etl_processed_label(service, message_id) 
+                # TODO: uncomment this later 
+                # success_add_label = add_etl_processed_label(service, message_id) 
+                success_add_label = True
 
             if not success or not success_add_label:
                 logging.error(f"Failed to upload attachment {i+1}/{total_attachments}: {filename}")
@@ -446,66 +456,69 @@ def fetch_and_upload_attachments(attachments_messages, metadata_lookup, service,
 
 
 def main():
+    # Create logs directory if it doesn't exist
+    if not os.path.exists("logs"):
+        os.makedirs("logs")
+    
     logging.basicConfig(
         filename="logs/main.log",      
         filemode="a",                   
-        level=logging.INFO,        
+        level=logging.DEBUG,        
         format="%(asctime)s - %(levelname)s - %(message)s"
     )
     
-    service = get_gmail_service("config.json")
+    service = get_gmail_service()
 
-    bucket_name = "this should be an env variable"
+    bucket_name = "ana-stage-v2-accounts-payable-s3-zy9l1"
     
     # Step 1: Fetch message IDs
-    # query = create_query(7, ["Apex", "D&H", "Ben Sherman", "O'Rourke Sales"])   
-    # print(query)
-    # "label:\"O'Rourke Sales\" after:2025/10/01"
-    # "label:\"Ben Sherman\" after:2025/10/01"
-    messages = fetch_message_ids(service, query="to:invoices@perpay.com (label:\"Apex\" OR label:\"S&S Activewear\") after:2025/10/10")
-    print(f"Fetched {len(messages)} message IDs")
+    #TODO: redo the create_query function to not include labels 
+    #query = create_query(7)#, "Ben Sherman", "O'Rourke Sales"])   
 
-    # # Get the ETL-Processed label id, this will be used to determine which emails have been processed 
+    print("Starting to fetch messages: ", datetime.now())
+    messages = fetch_message_ids(service, query="to:invoices@perpay.com after:2025/10/01")
+    print(f"Fetched {len(messages)} message IDs at {datetime.now()}")
+
+    # Get the ETL-Processed label id, this will be used to attach emails as being etl-processed
     # etl_label_id = get_or_create_label_id(service, "ETL-Processed")
     
     # Step 2: Fetch metadata in batches (smaller batches for metadata)
     message_metadata_map = get_messages_metadata_batch(service, messages, batch_size=40, delay_between_batches=0.5)
-    print(f"Fetched metadata for {len(message_metadata_map)} messages")
+    print(f"Fetched metadata for {len(message_metadata_map)} messages at {datetime.now()}")
     
     # Step 3: Create metadata lookup (filter out ETL-Processed)
     metadata_lookup = create_metadata_lookup(message_metadata_map)
     print(f"Created metadata lookup with {len(metadata_lookup)} emails (excluding ETL-Processed)")
-    print(metadata_lookup)
     
-    # # Step 4: Fetch full payloads in smaller batches (larger delay for full payloads)
-    # message_full_payload_map = get_messages_full_batch(service, metadata_lookup, batch_size=25, delay_between_batches=2.0)
-    # print(f"Fetched full payloads for {len(message_full_payload_map)} messages")
+    # Step 4: Fetch full payloads in smaller batches (larger delay for full payloads)
+    message_full_payload_map = get_messages_full_batch(service, metadata_lookup, batch_size=25, delay_between_batches=2.0)
+    print(f"Fetched full payloads for {len(message_full_payload_map)} messages")
 
-    # # Step 5: Extract attachment information
-    # messages_attachments = get_attachments_messages(message_full_payload_map)
-    # print(f"Found {len(messages_attachments)} attachments")
+    # Step 5: Extract attachment information
+    messages_attachments = get_attachments_messages(message_full_payload_map)
+    print(f"Found {len(messages_attachments)} attachments")
     
-    # # Step 6: Fetch and upload attachments immediately (memory optimized)
-    # if messages_attachments:
-    #     upload_results = fetch_and_upload_attachments(
-    #         messages_attachments, 
-    #         metadata_lookup, 
-    #         service, 
-    #         bucket_name, 
-    #         delay_between_requests=0.2
-    #     )
+    # Step 6: Fetch and upload attachments immediately (memory optimized)
+    if messages_attachments:
+        upload_results = fetch_and_upload_attachments(
+            messages_attachments, 
+            metadata_lookup, 
+            service, 
+            bucket_name, 
+            delay_between_requests=0.2
+        )
         
-    #     successful_uploads = sum(1 for result in upload_results.values() if result.get('success', False))
-    #     print(f"Successfully uploaded {successful_uploads} out of {len(messages_attachments)} attachments")
+        successful_uploads = sum(1 for result in upload_results.values() if result.get('success', False))
+        print(f"Successfully uploaded {successful_uploads} out of {len(messages_attachments)} attachments")
         
-    #     # Log any failed uploads
-    #     failed_uploads = [result for result in upload_results.values() if not result.get('success', False)]
-    #     if failed_uploads:
-    #         print(f"Failed uploads: {len(failed_uploads)}")
-    #         for failed in failed_uploads[:5]:  # Show first 5 failures
-    #             print(f"  - {failed['filename']}: {failed.get('error', 'Unknown error')}")
-    # else:
-    #     print("No attachments found to process")
+        # Log any failed uploads
+        failed_uploads = [result for result in upload_results.values() if not result.get('success', False)]
+        if failed_uploads:
+            print(f"Failed uploads: {len(failed_uploads)}")
+            for failed in failed_uploads[:5]:  # Show first 5 failures
+                print(f"  - {failed['filename']}: {failed.get('error', 'Unknown error')}")
+    else:
+        print("No attachments found to process")
 
 if __name__ == "__main__":
     main()

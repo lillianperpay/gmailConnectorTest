@@ -7,8 +7,7 @@ except ImportError:
 import json
 import datetime
 from datetime import datetime, timedelta
-import os
-import shlex
+import logging
 
 def create_query(after_days: int, labels: list[str]) -> str:
     """
@@ -21,23 +20,31 @@ def create_query(after_days: int, labels: list[str]) -> str:
     Returns:
         str: A valid Gmail query string.
     """
-    # Compute date
-    date_cutoff = datetime.now() - timedelta(days=after_days)
-    date_str = date_cutoff.strftime("%Y/%m/%d")
-
-    label_queries = [f'label:"{label}"' if " " in label or "'" in label else f'label:{label}' for label in labels]
+    # Compute the date string in YYYY/MM/DD format
+    cutoff_date = datetime.now() - timedelta(days=after_days)
+    date_str = cutoff_date.strftime("%Y/%m/%d")
     
-    # Join labels with OR if there’s more than one
-    label_part = " OR ".join(label_queries)
+    # Escape all labels with backslashes
+    quoted_labels = [f'label:\\"{label}\\"' for label in labels]
     
-    # Combine label part and date filter
-    query = f"to:invoices@perpay.com ({label_part}) after:{date_str}"
-
+    # Combine labels with OR
+    if len(quoted_labels) > 1:
+        label_part = "(" + " OR ".join(quoted_labels) + ")"
+    elif quoted_labels:
+        label_part = quoted_labels[0]
+    else:
+        label_part = ""  # No labels specified
+    
+    # Build final query
+    query_parts = [f"to:invoices@perpay.com", label_part, f"after:{date_str}"]
+    query = " ".join(part for part in query_parts if part)  # Skip empty parts
+    
     return query
 
-def create_s3_key(attachment_id, message_id, filename, metadata_lookup):
+def create_filename(attachment_id, message_id, filename, metadata_lookup):
     """
-    Create the s3 key that will be the filename for attachments in the S3 bucket
+    Create the filename (filename string) for the attachment based on the attachment id, message id, filename, and metadata lookup
+    the filename is also known as the s3 key
     """
     if message_id not in metadata_lookup:
         logging.error(f"Message ID {message_id} not found in metadata_lookup")
@@ -46,11 +53,21 @@ def create_s3_key(attachment_id, message_id, filename, metadata_lookup):
     vendor = metadata_lookup[message_id]["vendor"]
     date = metadata_lookup[message_id]["date"]
 
+    # change the date so it doesn't have slashes because that creates sub-folders in S3
+    date = date.replace("/", "-")
+
     # Create a unique hash for the attachment
     messageid_attachment_id = f"{message_id}_{attachment_id}"
     hash = hashlib.sha256(messageid_attachment_id.encode("utf-8")).hexdigest()[:4]
 
-    s3_key = f"{vendor}_{date}_{filename}_{hash}"
+    if filename[-3:] == "pdf":
+        file_type = "pdf"
+    elif filename[-3:] == "csv":
+        file_type = "csv"
+    else:
+        logging.error(f"Unknown file type: {filename}")
+
+    s3_key = f"{vendor}_{date}_{filename[:-3]}_{hash}.{file_type}"
     return s3_key
 
 def extract_attachments_from_payload(payload):
@@ -90,6 +107,42 @@ def extract_attachments_from_payload(payload):
     
     return attachments
 
+def upload_to_s3(file_name, filedata, bucket_name):
+    # Create an STS client
+    sts_client = boto3.client('sts')
+
+    # Assume the IAM role
+    # try:
+    #     assumed_role = sts_client.assume_role(
+    #         RoleArn= 'arn:aws:iam:::role/pp-stage-admin-role',
+    #         RoleSessionName= 'lillianjiang'
+    #     )
+    #     credentials = assumed_role['Credentials']
+    # except Exception as e:
+    #     logging.error(f"Error assuming role: {e}", exc_info=True)
+    #     return False
+
+    # # Create a new session with the temporary credentials
+    # try:
+    #     session = boto3.Session(
+    #         aws_access_key_id=credentials['AccessKeyId'],
+    #         aws_secret_access_key=credentials['SecretAccessKey'],
+    #         aws_session_token=credentials['SessionToken']
+    #     )
+    # except Exception as e:
+    #     logging.error(f"Error creating session: {e}", exc_info=True)
+    #     return False
+
+    # Create an S3 client using the new session
+    try:
+        s3 = boto3.client('s3')
+        s3.put_object(Bucket=bucket_name, Key=f"raw_files/{file_name}", Body=filedata)
+        logging.info(f"Successfully uploaded {file_name} to S3 bucket {bucket_name}/raw_files")
+        return True
+    except Exception as e:
+        logging.error(f"Error creating S3 client: {e}", exc_info=True)
+        return False
+
 def send_attachments_to_s3(file_data, s3_key, bucket_name):
     """
     This sends a file to S3 based on the attachment data and folder path 
@@ -114,8 +167,6 @@ def send_attachments_to_s3(file_data, s3_key, bucket_name):
     except Exception as e:
         logging.error(f"Error uploading {s3_key} to S3: {e}", exc_info=True)
         return False
-
-import logging
 
 def get_or_create_label_id(service, label_name):
     """Finds a label's ID by name. Creates it if it doesn't exist."""
