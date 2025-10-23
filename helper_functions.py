@@ -4,8 +4,41 @@ try:
     import boto3
 except ImportError:
     boto3 = None
+import json
+import datetime
+from datetime import datetime, timedelta
+import os
+import shlex
+
+def create_query(after_days: int, labels: list[str]) -> str:
+    """
+    Builds a Gmail API query string filtering by label and date.
+    
+    Args:
+        after_days (int): Number of days before today to include messages from.
+        labels (list[str]): List of Gmail label names.
+    
+    Returns:
+        str: A valid Gmail query string.
+    """
+    # Compute date
+    date_cutoff = datetime.now() - timedelta(days=after_days)
+    date_str = date_cutoff.strftime("%Y/%m/%d")
+
+    label_queries = [f'label:"{label}"' if " " in label or "'" in label else f'label:{label}' for label in labels]
+    
+    # Join labels with OR if there’s more than one
+    label_part = " OR ".join(label_queries)
+    
+    # Combine label part and date filter
+    query = f"to:invoices@perpay.com ({label_part}) after:{date_str}"
+
+    return query
 
 def create_s3_key(attachment_id, message_id, filename, metadata_lookup):
+    """
+    Create the s3 key that will be the filename for attachments in the S3 bucket
+    """
     if message_id not in metadata_lookup:
         logging.error(f"Message ID {message_id} not found in metadata_lookup")
         return f"unknown_{filename}"
@@ -136,3 +169,31 @@ def add_etl_processed_label(service, message_id):
     except Exception as e:
         logging.error(f"Error adding {label} label to message {message_id}: {e}", exc_info=True)
         return False
+
+def make_labels_dict(service, makeFile):
+    """
+    Args:
+        service: Gmail service object
+        makeFile: boolean to indicate saving off the dictionary into a separate file or not
+
+    This function queries the Gmail API for label information 
+    It creates a dictionary where the key is the label name and the value is the label id
+    This function is helpful to use when adding new vendors 
+    The result of labels_dict will be stored in its own file so we don't always have to call the api 
+    """
+    labels_response = service.users().labels().list(userId='me').execute()
+    labels = labels_response.get('labels', [])
+    labels_dict = {label['name']: label['id'] for label in labels}
+
+    if makeFile:
+        filename = "labelsDict"
+        try:
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(labels_dict, f, indent=4)
+            print(f"Successfully saved labels to {filename}")
+        except IOError as e:
+            print(f"Error: Could not save file {filename}. {e}")
+        except Exception as e:
+            print(f"An unexpected error occurred during saving: {e}")
+
+    return labels_dict
