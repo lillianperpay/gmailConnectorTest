@@ -60,14 +60,21 @@ def create_filename(attachment_id, message_id, filename, metadata_lookup):
     messageid_attachment_id = f"{message_id}_{attachment_id}"
     hash = hashlib.sha256(messageid_attachment_id.encode("utf-8")).hexdigest()[:4]
 
-    if filename[-3:] == "pdf":
+    # Check file extension (case-insensitive)
+    filename_lower = filename.lower()
+    if filename_lower.endswith(".pdf"):
         file_type = "pdf"
-    elif filename[-3:] == "csv":
+        base_filename = filename[:-4] if len(filename) >= 4 else filename
+    elif filename_lower.endswith(".csv"):
         file_type = "csv"
+        base_filename = filename[:-4] if len(filename) >= 4 else filename
     else:
         logging.error(f"Unknown file type: {filename}")
+        file_type = "unknown"
+        # Find the last dot to remove the extension
+        base_filename = filename.rsplit('.', 1)[0] if '.' in filename else filename
 
-    s3_key = f"{vendor}_{date}_{filename[:-3]}_{hash}.{file_type}"
+    s3_key = f"{vendor}_{date}_{base_filename}_{hash}.{file_type}"
     return s3_key
 
 def extract_attachments_from_payload(payload):
@@ -221,11 +228,12 @@ def add_etl_processed_label(service, message_id):
         logging.error(f"Error adding {label} label to message {message_id}: {e}", exc_info=True)
         return False
 
-def make_labels_dict(service, makeFile):
+def make_labels_dict(service, makeFile, key="name"):
     """
     Args:
         service: Gmail service object
         makeFile: boolean to indicate saving off the dictionary into a separate file or not
+        key: the key to use for the dictionary, either "name" or "id"
 
     This function queries the Gmail API for label information 
     It creates a dictionary where the key is the label name and the value is the label id
@@ -234,10 +242,17 @@ def make_labels_dict(service, makeFile):
     """
     labels_response = service.users().labels().list(userId='me').execute()
     labels = labels_response.get('labels', [])
-    labels_dict = {label['name']: label['id'] for label in labels}
 
+    if key == "name":
+        labels_dict = {label['name']: label['id'] for label in labels}
+    elif key == "id":
+        labels_dict = {label['id']: label['name'] for label in labels}
+    else:
+        logging.error(f"Invalid key: {key}")
+        return None
+
+    filename = f"labels/{key}.json"
     if makeFile:
-        filename = "labelsDict"
         try:
             with open(filename, 'w', encoding='utf-8') as f:
                 json.dump(labels_dict, f, indent=4)
@@ -248,3 +263,20 @@ def make_labels_dict(service, makeFile):
             print(f"An unexpected error occurred during saving: {e}")
 
     return labels_dict
+
+def get_vendor_from_label_id(label_id_to_check):
+    """
+    This function gets the vendor from the label id
+    Args:
+        label_id_to_check: the label id to check
+    Returns:
+        str: the vendor name
+    """
+    try:
+        with open("labels/id.json", "r") as f:
+            labels_dict = json.load(f)
+        vendor = labels_dict.get(label_id_to_check, None)
+        return vendor
+    except Exception as e:
+        logging.error(f"Error getting vendor from label id: {e}", exc_info=True)
+        return None
