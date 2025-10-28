@@ -390,7 +390,7 @@ def main():
     # Step 1: Fetch message IDs
 
     print("Starting to fetch messages: ", datetime.now())
-    messages = fetch_message_ids(service, query="to:invoices@perpay.com newer_than:180d has:attachment (filename:pdf OR filename:csv) -label:ETL-Processed")
+    messages = fetch_message_ids(service, query="to:invoices@perpay.com newer_than:7d has:attachment (filename:pdf OR filename:csv) -label:ETL-Processed")
     print(f"Fetched {len(messages)} message IDs at {datetime.now()}")
 
     # Get the ETL-Processed label id, this will be used to attach emails as being etl-processed
