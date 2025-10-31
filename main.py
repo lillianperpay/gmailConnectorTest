@@ -1,43 +1,13 @@
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
 import logging 
 import email.utils
 import base64
 import time
 from typing import List, Dict, Any
 from helper_functions import *
-from dotenv import load_dotenv
 import os
 import datetime
 from datetime import datetime, timedelta
 
-
-def get_gmail_service():
-    """
-    Takes in the configuration information and returns a service object, which is used to connect to Gmail
-    """
-    load_dotenv()
-    logging.info("Loading credentials from .env file")
-    try:
-        creds = Credentials(
-            token=None,
-            token_uri=os.getenv("token_uri"),
-            refresh_token=os.getenv("client_refresh_token"),
-            client_id=os.getenv("client_id"),
-            client_secret=os.getenv("client_secret")
-        )
-    except Exception as e:
-        logging.error(f"Error loading credentials: {e}", exc_info=True)
-        return None
-
-    try:
-        service = build('gmail', 'v1', credentials=creds)
-    except Exception as e:
-        logging.error(f"Error building Gmail service: {e}", exc_info=True)
-        return None
-
-    print("built credentials")
-    return service
 
 def fetch_message_ids(service, query):
     """
@@ -71,14 +41,14 @@ def fetch_message_ids(service, query):
         logging.error(f"Error fetching message list: {e}")
         return []
 
-def get_messages_metadata_batch(service, message_ids, batch_size=100, delay_between_batches=0.5):
+def get_messages_metadata_batch(service, message_ids, batch_size=20, delay_between_batches=0.5):
     """
     Fetch metadata for all message_ids in smaller batches to avoid rate limits.
     
     Args:
         service: Gmail service object
         message_ids: List of message IDs to fetch metadata for
-        batch_size: Number of messages to process in each batch (default: 100)
+        batch_size: Number of messages to process in each batch (default: 20)
         delay_between_batches: Seconds to wait between batches (default: 0.5)
     """
     message_metadata_map = {}
@@ -414,8 +384,10 @@ def fetch_and_upload_attachments(attachments_messages, metadata_lookup, service,
             # Upload to S3 immediately
             logging.debug(f"Uploading to S3, s3_key: {s3_key}")
             logging.debug(f"File snippet: {file_data[:20]}")
-            success = upload_to_s3(s3_key, file_data, bucket_name)
-            
+            #success = upload_to_s3(s3_key, file_data, bucket_name)
+
+            success = True
+
             upload_results[attachment_id] = {
                 'success': success,
                 'filename': filename,
@@ -484,17 +456,28 @@ def main():
     # query = create_query(7, ["Apex", "Jeg & Sons"])
     # print(query)
 
-    # print("Starting to fetch messages: ", datetime.now())
-    # messages = fetch_message_ids(service, query="to:invoices@perpay.com newer_than:7d has:attachment (filename:pdf OR filename:csv) -label:ETL-Processed")
-    # print(f"Fetched {len(messages)} message IDs at {datetime.now()}")
+    print("Starting to fetch messages: ", datetime.now())
+    messages = fetch_message_ids(
+            service, 
+            query="to:invoices@perpay.com newer_than:3d --label:CATEGORY_PROMOTIONS --label:CATEGORY_UPDATES --label:Zapier --label:INBOX --label:IMPORTANT --label:UNREAD --label:Zapier Alerts --label:Superseded/z-junk --label:Superseded/zRemittances")
+    print(f"Fetched {len(messages)} message IDs at {datetime.now()}")
 
-    # # Get the ETL-Processed label id, this will be used to attach emails as being etl-processed
-    # # etl_label_id = get_or_create_label_id(service, "ETL-Processed")
+    # Get the ETL-Processed label id, this will be used to attach emails as being etl-processed
+    # etl_label_id = get_or_create_label_id(service, "ETL-Processed")
     
-    # # Step 2: Fetch metadata in batches (smaller batches for metadata)
-    # message_metadata_map = get_messages_metadata_batch(service, messages, batch_size=40, delay_between_batches=0.5)
-    # print(f"Fetched metadata for {len(message_metadata_map)} messages at {datetime.now()}")
-    
+    # Step 2: Fetch metadata in batches (smaller batches for metadata)
+    message_metadata_map = get_messages_metadata_batch(service, messages, batch_size=30, delay_between_batches=0.5)
+    print(f"Fetched metadata for {len(message_metadata_map)} messages at {datetime.now()}")
+    filename = f"message_metadata.json"
+    try:
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(message_metadata_map, f, indent=4)
+        print(f"Successfully saved labels to {filename}")
+    except IOError as e:
+        print(f"Error: Could not save file {filename}. {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred during saving: {e}")
+
     # # Step 3: Create metadata lookup (filter out ETL-Processed)
     # metadata_lookup = create_metadata_lookup(message_metadata_map)
     # print(f"Created metadata lookup with {len(metadata_lookup)} emails at {datetime.now()}")

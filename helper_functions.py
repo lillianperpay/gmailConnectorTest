@@ -8,6 +8,38 @@ import json
 import datetime
 from datetime import datetime, timedelta
 import logging
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from dotenv import load_dotenv
+import os
+
+
+def get_gmail_service():
+    """
+    Takes in the configuration information and returns a service object, which is used to connect to Gmail
+    """
+    load_dotenv()
+    logging.info("Loading credentials from .env file")
+    try:
+        creds = Credentials(
+            token=None,
+            token_uri=os.getenv("token_uri"),
+            refresh_token=os.getenv("client_refresh_token"),
+            client_id=os.getenv("client_id"),
+            client_secret=os.getenv("client_secret")
+        )
+    except Exception as e:
+        logging.error(f"Error loading credentials: {e}", exc_info=True)
+        return None
+
+    try:
+        service = build('gmail', 'v1', credentials=creds)
+    except Exception as e:
+        logging.error(f"Error building Gmail service: {e}", exc_info=True)
+        return None
+
+    print("built credentials")
+    return service
 
 def create_query(after_days: int, labels: list[str]) -> str:
     """
@@ -57,7 +89,7 @@ def create_filename(attachment_id, message_id, filename, metadata_lookup):
     date = date.replace("/", "-")
 
     # Create a unique hash for the attachment
-    messageid_attachment_id = f"{message_id}_{attachment_id}"
+    messageid_attachment_id = f"{message_id}_{filename}"
     hash = hashlib.sha256(messageid_attachment_id.encode("utf-8")).hexdigest()[:4]
 
     # Check file extension (case-insensitive)
@@ -173,59 +205,6 @@ def send_attachments_to_s3(file_data, s3_key, bucket_name):
         return True
     except Exception as e:
         logging.error(f"Error uploading {s3_key} to S3: {e}", exc_info=True)
-        return False
-
-def get_or_create_label_id(service, label_name):
-    """Finds a label's ID by name. Creates it if it doesn't exist."""
-    
-    try:
-        results = service.users().labels().list(userId='me').execute()
-        labels = results.get('labels', [])
-        
-        for label in labels:
-            if label['name'] == label_name:
-                return label['id'] 
-                
-    except Exception as e:
-        logging.error(f"Error listing labels: {e}", exc_info=True)
-        return None
-
-    logging.info(f"Label '{label_name}' not found, creating it...")
-    label_body = {
-        'name': label_name,
-        'labelListVisibility': 'labelShow',
-        'messageListVisibility': 'show'
-    }
-    
-    try:
-        new_label = service.users().labels().create(userId='me', body=label_body).execute()
-        logging.info(f"Created label with ID: {new_label['id']}")
-        return new_label['id']
-    except Exception as e:
-        logging.error(f"Error creating label '{label_name}': {e}", exc_info=True)
-        return None
-
-def add_etl_processed_label(service, message_id):
-    """
-    This adds the ETL-Processed label to the message
-    Args:
-        service: Gmail service object
-        message_id: The ID of the message to add the label to
-    Returns:
-        bool: True if the label was added successfully, False otherwise
-    """ 
-    
-    label = "ETL-Processed"
-    try:
-        service.users().messages().modify(
-            userId='me',
-            id=message_id,
-            body={'addLabelIds': [label]}
-        ).execute()
-        logging.info(f"Successfully added {label} label to message {message_id}")
-        return True
-    except Exception as e:
-        logging.error(f"Error adding {label} label to message {message_id}: {e}", exc_info=True)
         return False
 
 def make_labels_dict(service, makeFile, key="name"):

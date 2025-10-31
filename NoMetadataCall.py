@@ -152,7 +152,7 @@ def create_metadata_lookup(message_full_payload):
 
     return metadata_lookup, attachments_messages
 
-def get_messages_full_batch(service, message_ids, batch_size=50, delay_between_batches=1.0):
+def get_messages_full_batch(service, message_ids, batch_size=20, delay_between_batches=1.0):
     """
     Get FULL PAYLOAD for the *filtered* list of message_ids in smaller batches to avoid rate limits.
     This will include attachment info
@@ -322,9 +322,7 @@ def fetch_and_upload_attachments(attachments_messages, metadata_lookup, service,
             # Upload to S3 immediately
             logging.debug(f"Uploading to S3, s3_key: {s3_key}")
             logging.debug(f"File snippet: {file_data[:20]}")
-            # TODO: uncomment this later 
-            #success = upload_to_s3(s3_key, file_data, bucket_name)
-            success = True
+            success = upload_to_s3(s3_key, file_data, bucket_name)
             
             upload_results[attachment_id] = {
                 'success': success,
@@ -388,14 +386,13 @@ def main():
     bucket_name = "ana-stage-v2-accounts-payable-s3-zy9l1"
     
     # Step 1: Fetch message IDs
+    general_query_to_use = "to:invoices@perpay.com newer_than:3d --label:CATEGORY_PROMOTIONS --label:CATEGORY_UPDATES --label:Zapier --label:INBOX --label:IMPORTANT --label:UNREAD --label:Zapier Alerts --label:Superseded/z-junk --label:Superseded/zRemittances"
 
     print("Starting to fetch messages: ", datetime.now())
-    messages = fetch_message_ids(service, query="to:invoices@perpay.com newer_than:7d has:attachment (filename:pdf OR filename:csv) -label:ETL-Processed")
+    messages = fetch_message_ids(
+                            service, 
+                            query="to:invoices@perpay.com newer_than:1d label:\"D&H\"")
     print(f"Fetched {len(messages)} message IDs at {datetime.now()}")
-
-    # Get the ETL-Processed label id, this will be used to attach emails as being etl-processed
-    # etl_label_id = get_or_create_label_id(service, "ETL-Processed")
-    
     # Step 2: Fetch specific message payload information
     print(f"Fetching full messages at {datetime.now()}")
     full_payload = get_messages_full_batch(service, messages)
@@ -430,3 +427,19 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# not going forward with the label bc it's too easy for accounting to manuaver 
+
+
+# keep a list of email id and status (parsed or not)
+    # keep a hash of email ids? 
+# keep on reparsing - as long as it doesn't cause any data quality 
+# if the hash is determined by unique email itself than 
+# get three days of full payload (exclude labels that we def know are not vendors)
+    # not keeping a file of the status of emails, just reupload them 
+
+# list of 5 vendors and ingest them for now
+# downstream filtering
+
+# build the labels dictionary every time I call it 
+# test a lot and think about future cases
